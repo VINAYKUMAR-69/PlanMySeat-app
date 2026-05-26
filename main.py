@@ -80,12 +80,11 @@ app.mount(
 # DATABASE CONFIGURATION
 # =========================================================
 
-DATABASE_URL = "mysql+pymysql://root:@localhost/seatmyplan"
+DATABASE_URL = DATABASE_URL = "sqlite:///./seatmyplan.db"
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=3600
+    connect_args={"check_same_thread": False}
 )
 
 SessionLocal = sessionmaker(
