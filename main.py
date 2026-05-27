@@ -44,14 +44,12 @@ from reportlab.platypus import (
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
-from datetime import datetime
-
 import os
 import re
 import shutil
 
 # =========================================================
-# CREATE FOLDERS FIRST
+# CREATE FOLDERS
 # =========================================================
 
 PROFILE_FOLDER = "profile_photos"
@@ -80,11 +78,23 @@ app.mount(
 # DATABASE CONFIGURATION
 # =========================================================
 
-DATABASE_URL = DATABASE_URL = "sqlite:///./seatmyplan.db"
+DATABASE_URL = os.getenv("MYSQL_PUBLIC_URL")
+
+if not DATABASE_URL:
+    raise Exception("MYSQL_PUBLIC_URL not found")
+
+# Railway gives mysql:// but SQLAlchemy needs mysql+pymysql://
+if DATABASE_URL.startswith("mysql://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "mysql://",
+        "mysql+pymysql://",
+        1
+    )
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    pool_pre_ping=True,
+    pool_recycle=3600
 )
 
 SessionLocal = sessionmaker(
@@ -117,9 +127,7 @@ async def disable_cache(request: Request, call_next):
     response = await call_next(request)
 
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-
     response.headers["Pragma"] = "no-cache"
-
     response.headers["Expires"] = "0"
 
     return response
@@ -295,43 +303,6 @@ class RoomRequest(BaseModel):
     building: str
 
 
-class FinalReportRequest(BaseModel):
-    student_name: str
-    reg_no: str
-    branch: str
-    seat_no: int
-    room_number: str
-    building: str
-    invigilator: str
-    subject: str
-    date: str
-    time: str
-
-
-class NotificationRequest(BaseModel):
-    title: str
-    message: str
-    date: str
-    time: str
-    sender: str
-
-
-class FeedbackRequest(BaseModel):
-    name: str
-    email: str
-    feedback_type: str
-    rating: int
-    message: str
-
-
-class FeatureRequestCreate(BaseModel):
-    feature_title: str
-    category: str
-    priority: str
-    description: str
-    use_case: str
-    expected_benefit: str
-
 # =========================================================
 # DATABASE SESSION
 # =========================================================
@@ -488,32 +459,6 @@ def get_students(
 
     return db.query(Student).all()
 
-
-@app.delete("/students/{student_id}")
-def delete_student(
-    student_id: int,
-    db: Session = Depends(get_db)
-):
-
-    student = db.query(Student).filter(
-        Student.id == student_id
-    ).first()
-
-    if not student:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Student not found"
-        )
-
-    db.delete(student)
-
-    db.commit()
-
-    return {
-        "message": "Student deleted successfully"
-    }
-
 # =========================================================
 # ROOMS
 # =========================================================
@@ -542,186 +487,6 @@ def get_rooms(
 
     return db.query(Room).all()
 
-
-@app.delete("/rooms/{room_id}")
-def delete_room(
-    room_id: int,
-    db: Session = Depends(get_db)
-):
-
-    room = db.query(Room).filter(
-        Room.id == room_id
-    ).first()
-
-    if not room:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Room not found"
-        )
-
-    db.delete(room)
-
-    db.commit()
-
-    return {
-        "message": "Room deleted successfully"
-    }
-
-# =========================================================
-# FINAL REPORTS
-# =========================================================
-
-@app.post("/final-reports")
-def add_report(
-    report: FinalReportRequest,
-    db: Session = Depends(get_db)
-):
-
-    new_report = FinalReport(**report.dict())
-
-    db.add(new_report)
-
-    db.commit()
-
-    db.refresh(new_report)
-
-    return new_report
-
-
-@app.get("/final-reports")
-def get_reports(
-    db: Session = Depends(get_db)
-):
-
-    return db.query(FinalReport).all()
-
-
-@app.delete("/final-reports/{report_id}")
-def delete_final_report(
-    report_id: int,
-    db: Session = Depends(get_db)
-):
-
-    report = db.query(FinalReport).filter(
-        FinalReport.id == report_id
-    ).first()
-
-    if not report:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Report not found"
-        )
-
-    db.delete(report)
-
-    db.commit()
-
-    return {
-        "message": "Final report deleted successfully"
-    }
-
-# =========================================================
-# NOTIFICATIONS
-# =========================================================
-
-@app.post("/notifications")
-def add_notification(
-    notification: NotificationRequest,
-    db: Session = Depends(get_db)
-):
-
-    new_notification = Notification(**notification.dict())
-
-    db.add(new_notification)
-
-    db.commit()
-
-    db.refresh(new_notification)
-
-    return new_notification
-
-
-@app.get("/notifications")
-def get_notifications(
-    db: Session = Depends(get_db)
-):
-
-    return db.query(Notification).order_by(
-        Notification.id.desc()
-    ).all()
-
-
-@app.delete("/notifications/{notification_id}")
-def delete_notification(
-    notification_id: int,
-    db: Session = Depends(get_db)
-):
-
-    notification = db.query(Notification).filter(
-        Notification.id == notification_id
-    ).first()
-
-    if not notification:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Notification not found"
-        )
-
-    db.delete(notification)
-
-    db.commit()
-
-    return {
-        "message": "Notification deleted successfully"
-    }
-
-# =========================================================
-# FEEDBACK
-# =========================================================
-
-@app.post("/feedback")
-def submit_feedback(
-    feedback: FeedbackRequest,
-    db: Session = Depends(get_db)
-):
-
-    new_feedback = Feedback(**feedback.dict())
-
-    db.add(new_feedback)
-
-    db.commit()
-
-    db.refresh(new_feedback)
-
-    return {
-        "message": "Feedback submitted successfully"
-    }
-
-# =========================================================
-# FEATURE REQUEST
-# =========================================================
-
-@app.post("/feature-request")
-def submit_feature_request(
-    feature: FeatureRequestCreate,
-    db: Session = Depends(get_db)
-):
-
-    new_feature = FeatureRequest(**feature.dict())
-
-    db.add(new_feature)
-
-    db.commit()
-
-    db.refresh(new_feature)
-
-    return {
-        "message": "Feature request submitted successfully"
-    }
-
 # =========================================================
 # PROFILE
 # =========================================================
@@ -744,10 +509,6 @@ def get_profile(
         )
 
     return profile
-
-# =========================================================
-# UPLOAD PROFILE PHOTO
-# =========================================================
 
 # =========================================================
 # UPLOAD PROFILE PHOTO
@@ -797,6 +558,7 @@ async def upload_photo(
         "message": "Photo uploaded successfully",
         "photo_url": photo_url
     }
+
 # =========================================================
 # DASHBOARD
 # =========================================================
@@ -806,390 +568,16 @@ def dashboard(
     db: Session = Depends(get_db)
 ):
 
-    # -----------------------------------------------------
-    # OVERVIEW COUNTS
-    # -----------------------------------------------------
-
-    total_students = db.query(Student).count()
-
-    total_rooms = db.query(Room).count()
-
-    total_allocated = db.query(FinalReport).count()
-
-    total_notifications = db.query(Notification).count()
-
-    total_faculties = db.query(Faculty).count()
-
-    total_feedbacks = db.query(Feedback).count()
-
-    total_feature_requests = db.query(
-        FeatureRequest
-    ).count()
-
-    total_exports = db.query(
-        ExamHistory
-    ).count()
-
-    # -----------------------------------------------------
-    # TOTAL BRANCHES
-    # -----------------------------------------------------
-
-    total_branches = db.query(
-        func.count(
-            func.distinct(Student.branch)
-        )
-    ).scalar()
-
-    # -----------------------------------------------------
-    # BRANCH DISTRIBUTION
-    # -----------------------------------------------------
-
-    branch_data = db.query(
-        Student.branch,
-        func.count(Student.id).label("count")
-    ).group_by(
-        Student.branch
-    ).all()
-
-    branch_distribution = []
-
-    for branch_name, count in branch_data:
-
-        branch_distribution.append({
-
-            "branch": branch_name,
-
-            "students": count
-        })
-
-    # -----------------------------------------------------
-    # PIE CHART DATA
-    # -----------------------------------------------------
-
-    pie_chart = {
-
-        "labels": [],
-
-        "values": []
-    }
-
-    if total_students > 0:
-
-        for branch_name, count in branch_data:
-
-            percentage = round(
-                (count / total_students) * 100,
-                1
-            )
-
-            pie_chart["labels"].append(
-                branch_name
-            )
-
-            pie_chart["values"].append(
-                percentage
-            )
-
-    # -----------------------------------------------------
-    # RECENT ALLOCATIONS
-    # -----------------------------------------------------
-
-    reports = db.query(
-        FinalReport
-    ).order_by(
-        FinalReport.id.desc()
-    ).limit(10).all()
-
-    recent_allocations = []
-
-    for report in reports:
-
-        recent_allocations.append({
-
-            "id": report.id,
-
-            "student_name": report.student_name,
-
-            "reg_no": report.reg_no,
-
-            "room_number": report.room_number,
-
-            "seat_no": report.seat_no,
-
-            "branch": report.branch,
-
-            "date": report.date,
-
-            "time": report.time,
-
-            "subject": report.subject,
-
-            "status": "Assigned"
-        })
-
-    # -----------------------------------------------------
-    # UPCOMING EXAM
-    # -----------------------------------------------------
-
-    latest_exam = db.query(
-        FinalReport
-    ).order_by(
-        FinalReport.id.desc()
-    ).first()
-
-    upcoming_exam = None
-
-    if latest_exam:
-
-        upcoming_exam = {
-
-            "subject": latest_exam.subject,
-
-            "date": latest_exam.date,
-
-            "time": latest_exam.time
-        }
-
-    # -----------------------------------------------------
-    # FINAL RESPONSE
-    # -----------------------------------------------------
-
     return {
 
-        "overview": {
+        "students": db.query(Student).count(),
 
-            "students": total_students,
+        "rooms": db.query(Room).count(),
 
-            "rooms": total_rooms,
+        "users": db.query(User).count(),
 
-            "allocated": total_allocated,
-
-            "branches": total_branches,
-
-            "notifications": total_notifications,
-
-            "faculties": total_faculties,
-
-            "feedbacks": total_feedbacks,
-
-            "feature_requests": total_feature_requests,
-
-            "exports": total_exports
-        },
-
-        "upcoming_exam": upcoming_exam,
-
-        "branch_distribution": branch_distribution,
-
-        "pie_chart": pie_chart,
-
-        "recent_allocations": recent_allocations
+        "notifications": db.query(Notification).count()
     }
-
-# =========================================================
-# DASHBOARD ANALYTICS
-# =========================================================
-
-@app.get("/dashboard/analytics")
-def dashboard_analytics(
-    db: Session = Depends(get_db)
-):
-
-    recent_reports = db.query(
-        FinalReport
-    ).order_by(
-        FinalReport.id.desc()
-    ).limit(5).all()
-
-    recent_notifications = db.query(
-        Notification
-    ).order_by(
-        Notification.id.desc()
-    ).limit(5).all()
-
-    return {
-
-        "total_students": db.query(
-            Student
-        ).count(),
-
-        "total_rooms": db.query(
-            Room
-        ).count(),
-
-        "total_reports": db.query(
-            FinalReport
-        ).count(),
-
-        "total_notifications": db.query(
-            Notification
-        ).count(),
-
-        "total_faculties": db.query(
-            Faculty
-        ).count(),
-
-        "total_feedbacks": db.query(
-            Feedback
-        ).count(),
-
-        "total_feature_requests": db.query(
-            FeatureRequest
-        ).count(),
-
-        "total_exports": db.query(
-            ExamHistory
-        ).count(),
-
-        "recent_reports": len(
-            recent_reports
-        ),
-
-        "recent_notifications": len(
-            recent_notifications
-        )
-    }
-
-# =========================================================
-# PIE CHART
-# =========================================================
-
-@app.get("/dashboard/pie-chart")
-def pie_chart(
-    db: Session = Depends(get_db)
-):
-
-    branches = db.query(
-        Student.branch,
-        func.count(Student.id).label("count")
-    ).group_by(
-        Student.branch
-    ).all()
-
-    total_students = db.query(
-        Student
-    ).count()
-
-    labels = []
-
-    values = []
-
-    if total_students > 0:
-
-        for branch_name, count in branches:
-
-            percentage = round(
-                (count / total_students) * 100,
-                1
-            )
-
-            labels.append(branch_name)
-
-            values.append(percentage)
-
-    return {
-
-        "labels": labels,
-
-        "values": values
-    }
-
-# =========================================================
-# BRANCH DISTRIBUTION
-# =========================================================
-
-@app.get("/dashboard/branch-distribution")
-def branch_distribution(
-    db: Session = Depends(get_db)
-):
-
-    branches = db.query(
-        Student.branch,
-        func.count(Student.id).label("count")
-    ).group_by(
-        Student.branch
-    ).all()
-
-    result = []
-
-    for branch_name, count in branches:
-
-        result.append({
-
-            "branch": branch_name,
-
-            "students": count
-        })
-
-    return result
-
-# =========================================================
-# RECENT ALLOCATIONS
-# =========================================================
-
-@app.get("/dashboard/recent-allocations")
-def recent_allocations(
-    db: Session = Depends(get_db)
-):
-
-    reports = db.query(
-        FinalReport
-    ).order_by(
-        FinalReport.id.desc()
-    ).limit(10).all()
-
-    return [
-
-        {
-
-            "id": report.id,
-
-            "student_name": report.student_name,
-
-            "reg_no": report.reg_no,
-
-            "room_number": report.room_number,
-
-            "seat_no": report.seat_no,
-
-            "branch": report.branch,
-
-            "date": report.date,
-
-            "time": report.time,
-
-            "subject": report.subject,
-
-            "status": "Assigned"
-        }
-
-        for report in reports
-    ]
-# =========================================================
-# SEATING PLAN
-# =========================================================
-
-@app.post("/seating-plans")
-def generate_seating_plan():
-
-    return {
-        "message": "Seating plan generated successfully"
-    }
-
-# =========================================================
-# EXAM HISTORY
-# =========================================================
-
-@app.get("/exam-history")
-def get_exam_history(
-    db: Session = Depends(get_db)
-):
-
-    return db.query(
-        ExamHistory
-    ).order_by(
-        ExamHistory.id.desc()
-    ).all()
 
 # =========================================================
 # DOWNLOAD REPORT
@@ -1200,7 +588,7 @@ def download_report(
     db: Session = Depends(get_db)
 ):
 
-    reports = db.query(FinalReport).all()
+    reports = db.query(Student).all()
 
     file_name = "final_report.pdf"
 
@@ -1226,20 +614,16 @@ def download_report(
         "Student",
         "Reg No",
         "Branch",
-        "Seat No",
-        "Room",
-        "Invigilator"
+        "Year"
     ]]
 
     for report in reports:
 
         data.append([
-            report.student_name,
+            report.name,
             report.reg_no,
             report.branch,
-            str(report.seat_no),
-            report.room_number,
-            report.invigilator
+            report.year
         ])
 
     table = Table(data)
@@ -1270,6 +654,8 @@ def download_report(
 # RUN SERVER
 # =========================================================
 
-# pip install fastapi uvicorn sqlalchemy pymysql reportlab email-validator python-multipart
+# pip install fastapi uvicorn sqlalchemy pymysql reportlab
+# pip install email-validator python-multipart
 
+# Run:
 # uvicorn main:app --host 0.0.0.0 --port 8000 --reload
