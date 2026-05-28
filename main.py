@@ -22,7 +22,7 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
-    func
+    ForeignKey
 )
 
 from sqlalchemy.orm import (
@@ -53,10 +53,8 @@ import shutil
 # =========================================================
 
 PROFILE_FOLDER = "profile_photos"
-BUG_FOLDER = "bug_screenshots"
 
 os.makedirs(PROFILE_FOLDER, exist_ok=True)
-os.makedirs(BUG_FOLDER, exist_ok=True)
 
 # =========================================================
 # FASTAPI APP
@@ -83,7 +81,6 @@ DATABASE_URL = os.getenv("MYSQL_PUBLIC_URL")
 if not DATABASE_URL:
     raise Exception("MYSQL_PUBLIC_URL not found")
 
-# Railway gives mysql:// but SQLAlchemy needs mysql+pymysql://
 if DATABASE_URL.startswith("mysql://"):
     DATABASE_URL = DATABASE_URL.replace(
         "mysql://",
@@ -168,8 +165,14 @@ class Student(Base):
     __tablename__ = "students"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    user_email = Column(
+        String(100),
+        ForeignKey("users.email")
+    )
+
     name = Column(String(100), nullable=False)
-    reg_no = Column(String(50), unique=True, nullable=False)
+    reg_no = Column(String(50), nullable=False)
     branch = Column(String(100), nullable=False)
     year = Column(String(50), nullable=False)
 
@@ -179,42 +182,15 @@ class Room(Base):
     __tablename__ = "rooms"
 
     id = Column(Integer, primary_key=True, index=True)
-    room_number = Column(String(50), unique=True, nullable=False)
+
+    user_email = Column(
+        String(100),
+        ForeignKey("users.email")
+    )
+
+    room_number = Column(String(50), nullable=False)
     capacity = Column(Integer, nullable=False)
     building = Column(String(100), nullable=False)
-
-
-class FinalReport(Base):
-
-    __tablename__ = "final_reports"
-
-    id = Column(Integer, primary_key=True, index=True)
-    student_name = Column(String(100), nullable=False)
-    reg_no = Column(String(50), nullable=False)
-    branch = Column(String(100), nullable=False)
-    seat_no = Column(Integer, nullable=False)
-    room_number = Column(String(50), nullable=False)
-    building = Column(String(100), nullable=False)
-    invigilator = Column(String(100), nullable=False)
-    subject = Column(String(100), nullable=False)
-    date = Column(String(50), nullable=False)
-    time = Column(String(50), nullable=False)
-
-
-class Faculty(Base):
-
-    __tablename__ = "faculties"
-
-    id = Column(Integer, primary_key=True, index=True)
-    faculty_id = Column(String(50), unique=True, nullable=False)
-    name = Column(String(100), nullable=False)
-    designation = Column(String(100), nullable=False)
-    department = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=False)
-    experience = Column(Integer, nullable=False)
-    papers = Column(Integer, nullable=False)
-    rating = Column(String(20), nullable=False)
-    status = Column(String(20), default="Active")
 
 
 class Notification(Base):
@@ -222,50 +198,17 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    user_email = Column(
+        String(100),
+        ForeignKey("users.email")
+    )
+
     title = Column(String(300), nullable=False)
     message = Column(String(1000), nullable=False)
     date = Column(String(50), nullable=False)
     time = Column(String(50), nullable=False)
     sender = Column(String(100), nullable=False)
-
-
-class Feedback(Base):
-
-    __tablename__ = "feedbacks"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    email = Column(String(100), nullable=False)
-    feedback_type = Column(String(100), nullable=False)
-    rating = Column(Integer, nullable=False)
-    message = Column(String(5000), nullable=False)
-
-
-class FeatureRequest(Base):
-
-    __tablename__ = "feature_requests"
-
-    id = Column(Integer, primary_key=True, index=True)
-    feature_title = Column(String(300), nullable=False)
-    category = Column(String(100), nullable=False)
-    priority = Column(String(100), nullable=False)
-    description = Column(String(5000), nullable=False)
-    use_case = Column(String(5000), nullable=False)
-    expected_benefit = Column(String(5000), nullable=False)
-
-
-class ExamHistory(Base):
-
-    __tablename__ = "exam_history"
-
-    id = Column(Integer, primary_key=True, index=True)
-    file_name = Column(String(300), nullable=False)
-    file_type = Column(String(50), nullable=False)
-    category = Column(String(100), nullable=False)
-    file_size = Column(String(50), nullable=False)
-    exported_by = Column(String(100), nullable=False)
-    export_date = Column(String(100), nullable=False)
-    export_time = Column(String(100), nullable=False)
 
 # =========================================================
 # CREATE TABLES
@@ -291,6 +234,7 @@ class LoginRequest(BaseModel):
 
 
 class StudentRequest(BaseModel):
+    user_email: EmailStr
     name: str
     reg_no: str
     branch: str
@@ -298,10 +242,19 @@ class StudentRequest(BaseModel):
 
 
 class RoomRequest(BaseModel):
+    user_email: EmailStr
     room_number: str
     capacity: int
     building: str
 
+
+class NotificationRequest(BaseModel):
+    user_email: EmailStr
+    title: str
+    message: str
+    date: str
+    time: str
+    sender: str
 
 # =========================================================
 # DATABASE SESSION
@@ -417,6 +370,7 @@ def login(
     return {
         "message": "Login Successful",
         "full_name": existing.full_name,
+        "email": existing.email,
         "role": existing.role
     }
 
@@ -431,7 +385,8 @@ def add_student(
 ):
 
     existing = db.query(Student).filter(
-        Student.reg_no == student.reg_no
+        Student.reg_no == student.reg_no,
+        Student.user_email == student.user_email
     ).first()
 
     if existing:
@@ -441,7 +396,13 @@ def add_student(
             detail="Register number already exists"
         )
 
-    new_student = Student(**student.dict())
+    new_student = Student(
+        user_email=student.user_email,
+        name=student.name,
+        reg_no=student.reg_no,
+        branch=student.branch,
+        year=student.year
+    )
 
     db.add(new_student)
 
@@ -452,12 +413,17 @@ def add_student(
     return new_student
 
 
-@app.get("/students")
+@app.get("/students/{email}")
 def get_students(
+    email: str,
     db: Session = Depends(get_db)
 ):
 
-    return db.query(Student).all()
+    students = db.query(Student).filter(
+        Student.user_email == email
+    ).all()
+
+    return students
 
 # =========================================================
 # ROOMS
@@ -469,7 +435,12 @@ def add_room(
     db: Session = Depends(get_db)
 ):
 
-    new_room = Room(**room.dict())
+    new_room = Room(
+        user_email=room.user_email,
+        room_number=room.room_number,
+        capacity=room.capacity,
+        building=room.building
+    )
 
     db.add(new_room)
 
@@ -480,12 +451,17 @@ def add_room(
     return new_room
 
 
-@app.get("/rooms")
+@app.get("/rooms/{email}")
 def get_rooms(
+    email: str,
     db: Session = Depends(get_db)
 ):
 
-    return db.query(Room).all()
+    rooms = db.query(Room).filter(
+        Room.user_email == email
+    ).all()
+
+    return rooms
 
 # =========================================================
 # PROFILE
@@ -563,32 +539,130 @@ async def upload_photo(
 # DASHBOARD
 # =========================================================
 
-@app.get("/dashboard")
-def dashboard(
+@app.get("/dashboard/{email}")
+def get_dashboard(
+    email: str,
     db: Session = Depends(get_db)
 ):
 
+    students_count = db.query(Student).filter(
+        Student.user_email == email
+    ).count()
+
+    rooms_count = db.query(Room).filter(
+        Room.user_email == email
+    ).count()
+
+    notifications_count = db.query(Notification).filter(
+        Notification.user_email == email
+    ).count()
+
+    allocated_count = students_count
+
+    branches = db.query(Student.branch).filter(
+        Student.user_email == email
+    ).distinct().all()
+
+    branch_count = len(branches)
+
     return {
 
-        "students": db.query(Student).count(),
+        "students": students_count,
 
-        "rooms": db.query(Room).count(),
+        "rooms": rooms_count,
 
-        "users": db.query(User).count(),
+        "notifications": notifications_count,
 
-        "notifications": db.query(Notification).count()
+        "allocated": allocated_count,
+
+        "branches": branch_count
+    }
+
+# =========================================================
+# CREATE NOTIFICATION
+# =========================================================
+
+@app.post("/notifications")
+def create_notification(
+    notification: NotificationRequest,
+    db: Session = Depends(get_db)
+):
+
+    new_notification = Notification(
+        user_email=notification.user_email,
+        title=notification.title,
+        message=notification.message,
+        date=notification.date,
+        time=notification.time,
+        sender=notification.sender
+    )
+
+    db.add(new_notification)
+
+    db.commit()
+
+    db.refresh(new_notification)
+
+    return new_notification
+
+# =========================================================
+# GET NOTIFICATIONS
+# =========================================================
+
+@app.get("/notifications/{email}")
+def get_notifications(
+    email: str,
+    db: Session = Depends(get_db)
+):
+
+    notifications = db.query(Notification).filter(
+        Notification.user_email == email
+    ).order_by(Notification.id.desc()).all()
+
+    return notifications
+
+# =========================================================
+# DELETE NOTIFICATION
+# =========================================================
+
+@app.delete("/notifications/{notification_id}")
+def delete_notification(
+    notification_id: int,
+    db: Session = Depends(get_db)
+):
+
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id
+    ).first()
+
+    if not notification:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Notification not found"
+        )
+
+    db.delete(notification)
+
+    db.commit()
+
+    return {
+        "message": "Notification deleted successfully"
     }
 
 # =========================================================
 # DOWNLOAD REPORT
 # =========================================================
 
-@app.get("/download-report")
+@app.get("/download-report/{email}")
 def download_report(
+    email: str,
     db: Session = Depends(get_db)
 ):
 
-    reports = db.query(Student).all()
+    reports = db.query(Student).filter(
+        Student.user_email == email
+    ).all()
 
     file_name = "final_report.pdf"
 
