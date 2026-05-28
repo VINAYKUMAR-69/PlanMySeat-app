@@ -76,11 +76,17 @@ app.mount(
 # DATABASE CONFIGURATION
 # =========================================================
 
+# =========================================================
+# DATABASE CONFIGURATION
+# =========================================================
+
 DATABASE_URL = os.getenv("MYSQL_PUBLIC_URL")
 
+# LOCAL DATABASE FOR TESTING
 if not DATABASE_URL:
-    raise Exception("MYSQL_PUBLIC_URL not found")
+    DATABASE_URL = "sqlite:///./seatmyplan.db"
 
+# FIX MYSQL URL
 if DATABASE_URL.startswith("mysql://"):
     DATABASE_URL = DATABASE_URL.replace(
         "mysql://",
@@ -88,11 +94,18 @@ if DATABASE_URL.startswith("mysql://"):
         1
     )
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=3600
-)
+# CREATE ENGINE
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=3600
+    )
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -101,7 +114,6 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
-
 # =========================================================
 # CORS
 # =========================================================
