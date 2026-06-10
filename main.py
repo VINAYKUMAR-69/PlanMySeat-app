@@ -12,7 +12,9 @@ from fastapi import (
 )
 
 from fastapi.responses import FileResponse
+
 from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, EmailStr
@@ -44,9 +46,27 @@ from reportlab.platypus import (
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
+from dotenv import load_dotenv
+
 import os
 import re
 import shutil
+import random
+import smtplib
+
+from datetime import datetime, timedelta
+
+from email.mime.text import MIMEText
+# =========================================================
+# LOAD ENV VARIABLES
+# =========================================================
+
+load_dotenv("vina.env")
+
+print("MYSQLHOST =", os.getenv("MYSQLHOST"))
+print("MYSQLPORT =", os.getenv("MYSQLPORT"))
+print("MYSQLUSER =", os.getenv("MYSQLUSER"))
+print("MYSQLDATABASE =", os.getenv("MYSQLDATABASE"))
 
 # =========================================================
 # CREATE FOLDERS
@@ -76,36 +96,50 @@ app.mount(
 # DATABASE CONFIGURATION
 # =========================================================
 
-# =========================================================
-# DATABASE CONFIGURATION
-# =========================================================
+MYSQLHOST = os.getenv("MYSQLHOST")
+MYSQLPORT = os.getenv("MYSQLPORT")
+MYSQLUSER = os.getenv("MYSQLUSER")
+MYSQLPASSWORD = os.getenv("MYSQLPASSWORD")
+MYSQLDATABASE = os.getenv("MYSQLDATABASE")
 
-DATABASE_URL = os.getenv("MYSQL_PUBLIC_URL")
-
-# LOCAL DATABASE FOR TESTING
-if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./seatmyplan.db"
-
-# FIX MYSQL URL
-if DATABASE_URL.startswith("mysql://"):
-    DATABASE_URL = DATABASE_URL.replace(
-        "mysql://",
-        "mysql+pymysql://",
-        1
+if not all([
+    MYSQLHOST,
+    MYSQLPORT,
+    MYSQLUSER,
+    MYSQLPASSWORD,
+    MYSQLDATABASE
+]):
+    raise Exception(
+        "Database environment variables are missing"
     )
 
-# CREATE ENGINE
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False}
-    )
-else:
+DATABASE_URL = (
+    f"mysql+pymysql://{MYSQLUSER}:{MYSQLPASSWORD}"
+    f"@{MYSQLHOST}:{MYSQLPORT}/{MYSQLDATABASE}"
+)
+
+print("Database URL created successfully")
+
+# =========================================================
+# DATABASE ENGINE
+# =========================================================
+
+try:
+
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,
         pool_recycle=3600
     )
+
+    print("Engine created successfully")
+
+except Exception as e:
+
+    print("Engine creation failed")
+    print(e)
+
+    raise e
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -114,6 +148,7 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
+
 # =========================================================
 # CORS
 # =========================================================
@@ -150,10 +185,15 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+
     full_name = Column(String(100), nullable=False)
+
     email = Column(String(100), unique=True, nullable=False)
+
     password = Column(String(255), nullable=False)
+
     role = Column(String(50), nullable=False)
+
     college_organization = Column(String(200), nullable=False)
 
 
@@ -162,13 +202,21 @@ class Profile(Base):
     __tablename__ = "profiles"
 
     id = Column(Integer, primary_key=True, index=True)
+
     full_name = Column(String(100), nullable=False)
+
     email = Column(String(100), unique=True, nullable=False)
+
     college = Column(String(200), nullable=False)
+
     role = Column(String(100), nullable=False)
+
     photo = Column(String(500), nullable=True)
+
     member_since = Column(String(100), nullable=True)
+
     exams_created = Column(Integer, default=0)
+
     last_login = Column(String(100), nullable=True)
 
 
@@ -184,8 +232,11 @@ class Student(Base):
     )
 
     name = Column(String(100), nullable=False)
+
     reg_no = Column(String(50), nullable=False)
+
     branch = Column(String(100), nullable=False)
+
     year = Column(String(50), nullable=False)
 
 
@@ -201,8 +252,40 @@ class Room(Base):
     )
 
     room_number = Column(String(50), nullable=False)
+
     capacity = Column(Integer, nullable=False)
+
     building = Column(String(100), nullable=False)
+
+
+class Faculty(Base):
+
+    __tablename__ = "faculties"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_email = Column(
+        String(100),
+        ForeignKey("users.email")
+    )
+
+    faculty_id = Column(String(50), nullable=False)
+
+    name = Column(String(100), nullable=False)
+
+    designation = Column(String(100), nullable=False)
+
+    department = Column(String(100), nullable=False)
+
+    phone = Column(String(20), nullable=False)
+
+    experience = Column(String(50), nullable=False)
+
+    papers = Column(String(50), nullable=False)
+
+    rating = Column(String(50), nullable=False)
+
+    status = Column(String(50), nullable=False)
 
 
 class Notification(Base):
@@ -217,16 +300,84 @@ class Notification(Base):
     )
 
     title = Column(String(300), nullable=False)
+
     message = Column(String(1000), nullable=False)
+
     date = Column(String(50), nullable=False)
+
     time = Column(String(50), nullable=False)
+
     sender = Column(String(100), nullable=False)
 
+# =========================================================
+# FEEDBACK MODEL
+# =========================================================
+
+class Feedback(Base):
+
+    __tablename__ = "feedbacks"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    name = Column(String(100), nullable=False)
+
+    email = Column(String(100), nullable=False)
+
+    feedback_type = Column(String(100), nullable=False)
+
+    rating = Column(String(20), nullable=False)
+
+    message = Column(String(1000), nullable=False)
+
+
+# =========================================================
+# FEATURE REQUEST MODEL
+# =========================================================
+
+class FeatureRequest(Base):
+
+    __tablename__ = "feature_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    feature_title = Column(String(200), nullable=False)
+    category = Column(String(100), nullable=False)
+    priority = Column(String(50), nullable=False)
+    description = Column(String(1000), nullable=False)
+    use_case = Column(String(1000), nullable=False)
+    expected_benefit = Column(String(1000), nullable=False)
+
+
+class OTPVerification(Base):
+
+    __tablename__ = "otp_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    email = Column(String(100), nullable=False)
+
+    otp = Column(String(10), nullable=False)
+
+    expiry_time = Column(String(100), nullable=False)
 # =========================================================
 # CREATE TABLES
 # =========================================================
 
-Base.metadata.create_all(bind=engine)
+try:
+
+    print("Connecting to database...")
+
+    with engine.connect() as conn:
+        print("Database connected successfully")
+
+    Base.metadata.create_all(bind=engine)
+
+    print("ALL TABLES CREATED SUCCESSFULLY")
+
+except Exception as e:
+
+    print("DATABASE ERROR")
+    print(e)
 
 # =========================================================
 # PYDANTIC MODELS
@@ -260,6 +411,19 @@ class RoomRequest(BaseModel):
     building: str
 
 
+class FacultyRequest(BaseModel):
+    user_email: EmailStr
+    faculty_id: str
+    name: str
+    designation: str
+    department: str
+    phone: str
+    experience: str
+    papers: str
+    rating: str
+    status: str
+
+
 class NotificationRequest(BaseModel):
     user_email: EmailStr
     title: str
@@ -268,6 +432,42 @@ class NotificationRequest(BaseModel):
     time: str
     sender: str
 
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyOTPRequest(BaseModel):
+    email: EmailStr
+    otp: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    new_password: str
+# =========================================================
+# FEEDBACK REQUEST
+# =========================================================
+
+class FeedbackRequest(BaseModel):
+    name: str
+    email: EmailStr
+    feedback_type: str
+    rating: int
+    message: str
+
+
+# =========================================================
+# FEATURE REQUEST REQUEST
+# =========================================================
+
+class FeatureRequestRequest(BaseModel):
+    feature_title: str
+    category: str
+    priority: str
+    description: str
+    use_case: str
+    expected_benefit: str
 # =========================================================
 # DATABASE SESSION
 # =========================================================
@@ -281,7 +481,270 @@ def get_db():
 
     finally:
         db.close()
+def send_otp_email(receiver_email, otp):
 
+    subject = "SeatMyPlan Password Reset OTP"
+
+    body = f"""
+Your OTP for password reset is:
+
+{otp}
+
+This OTP is valid for 5 minutes.
+
+SeatMyPlan Team
+"""
+
+    msg = MIMEText(body)
+
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_ADDRESS
+    msg["To"] = receiver_email
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+
+        server.starttls()
+
+        server.login(
+            EMAIL_ADDRESS,
+            EMAIL_PASSWORD
+        )
+
+        server.send_message(msg)
+# =========================================================
+# FEEDBACKS
+# =========================================================
+
+@app.post("/feedbacks")
+def create_feedback(
+    feedback: FeedbackRequest,
+    db: Session = Depends(get_db)
+):
+
+    new_feedback = Feedback(
+        name=feedback.name,
+        email=feedback.email,
+        feedback_type=feedback.feedback_type,
+        rating=feedback.rating,
+        message=feedback.message
+    )
+
+    db.add(new_feedback)
+    db.commit()
+
+    return {
+        "message": "Feedback submitted successfully"
+    }
+
+
+@app.get("/feedbacks")
+def get_feedbacks(
+    db: Session = Depends(get_db)
+):
+
+    return db.query(Feedback).order_by(
+        Feedback.id.desc()
+    ).all()
+
+
+@app.delete("/feedbacks/{feedback_id}")
+def delete_feedback(
+    feedback_id: int,
+    db: Session = Depends(get_db)
+):
+
+    feedback = db.query(Feedback).filter(
+        Feedback.id == feedback_id
+    ).first()
+
+    if not feedback:
+        raise HTTPException(
+            status_code=404,
+            detail="Feedback not found"
+        )
+
+    db.delete(feedback)
+    db.commit()
+
+    return {
+        "message": "Feedback deleted successfully"
+    }
+@app.post("/forgot-password")
+def forgot_password(
+    data: ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+
+    user = db.query(User).filter(
+        User.email == data.email
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Email not found"
+        )
+
+    otp = str(random.randint(100000, 999999))
+
+    expiry = datetime.now() + timedelta(minutes=5)
+
+    existing = db.query(
+        OTPVerification
+    ).filter(
+        OTPVerification.email == data.email
+    ).first()
+
+    if existing:
+        db.delete(existing)
+        db.commit()
+
+    otp_record = OTPVerification(
+        email=data.email,
+        otp=otp,
+        expiry_time=str(expiry)
+    )
+
+    db.add(otp_record)
+    db.commit()
+
+    send_otp_email(data.email, otp)
+
+    return {
+        "message": "OTP sent successfully"
+    }
+
+
+@app.post("/verify-otp")
+def verify_otp(
+    data: VerifyOTPRequest,
+    db: Session = Depends(get_db)
+):
+
+    record = db.query(
+        OTPVerification
+    ).filter(
+        OTPVerification.email == data.email,
+        OTPVerification.otp == data.otp
+    ).first()
+
+    if not record:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OTP"
+        )
+
+    expiry = datetime.fromisoformat(
+        record.expiry_time
+    )
+
+    if datetime.now() > expiry:
+        raise HTTPException(
+            status_code=400,
+            detail="OTP expired"
+        )
+
+    return {
+        "message": "OTP verified successfully"
+    }
+
+
+@app.post("/reset-password")
+def reset_password(
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+
+    user = db.query(User).filter(
+        User.email == data.email
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+
+    user.password = data.new_password
+
+    db.commit()
+
+    db.query(
+        OTPVerification
+    ).filter(
+        OTPVerification.email == data.email
+    ).delete()
+
+    db.commit()
+
+    return {
+        "message": "Password reset successful"
+    }
+
+
+# =========================================================
+# FEATURE REQUESTS
+# =========================================================
+
+@app.post("/feature-requests")
+def create_feature_request(
+    request: FeatureRequestRequest,
+    db: Session = Depends(get_db)
+):
+
+    new_request = FeatureRequest(
+        feature_title=request.feature_title,
+        category=request.category,
+        priority=request.priority,
+        description=request.description,
+        use_case=request.use_case,
+        expected_benefit=request.expected_benefit
+    )
+
+    db.add(new_request)
+    db.commit()
+
+    return {
+        "message": "Feature request submitted successfully"
+    }
+
+
+@app.get("/feature-requests")
+def get_feature_requests(
+    db: Session = Depends(get_db)
+):
+
+    return db.query(
+        FeatureRequest
+    ).order_by(
+        FeatureRequest.id.desc()
+    ).all()
+
+
+@app.delete("/feature-requests/{request_id}")
+def delete_feature_request(
+    request_id: int,
+    db: Session = Depends(get_db)
+):
+
+    request = db.query(
+        FeatureRequest
+    ).filter(
+        FeatureRequest.id == request_id
+    ).first()
+
+    if not request:
+        raise HTTPException(
+            status_code=404,
+            detail="Feature request not found"
+        )
+
+    db.delete(request)
+    db.commit()
+
+    return {
+        "message": "Feature request deleted successfully"
+    }
 # =========================================================
 # HOME
 # =========================================================
@@ -396,12 +859,12 @@ def add_student(
     db: Session = Depends(get_db)
 ):
 
-    existing = db.query(Student).filter(
+    existing_student = db.query(Student).filter(
         Student.reg_no == student.reg_no,
         Student.user_email == student.user_email
     ).first()
 
-    if existing:
+    if existing_student:
 
         raise HTTPException(
             status_code=400,
@@ -422,7 +885,9 @@ def add_student(
 
     db.refresh(new_student)
 
-    return new_student
+    return {
+        "message": "Student added successfully"
+    }
 
 
 @app.get("/students/{email}")
@@ -437,6 +902,32 @@ def get_students(
 
     return students
 
+
+@app.delete("/students/{student_id}")
+def delete_student(
+    student_id: int,
+    db: Session = Depends(get_db)
+):
+
+    student = db.query(Student).filter(
+        Student.id == student_id
+    ).first()
+
+    if not student:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Student not found"
+        )
+
+    db.delete(student)
+
+    db.commit()
+
+    return {
+        "message": "Student deleted successfully"
+    }
+
 # =========================================================
 # ROOMS
 # =========================================================
@@ -446,6 +937,18 @@ def add_room(
     room: RoomRequest,
     db: Session = Depends(get_db)
 ):
+
+    existing_room = db.query(Room).filter(
+        Room.room_number == room.room_number,
+        Room.user_email == room.user_email
+    ).first()
+
+    if existing_room:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Room already exists"
+        )
 
     new_room = Room(
         user_email=room.user_email,
@@ -460,7 +963,9 @@ def add_room(
 
     db.refresh(new_room)
 
-    return new_room
+    return {
+        "message": "Room added successfully"
+    }
 
 
 @app.get("/rooms/{email}")
@@ -474,6 +979,116 @@ def get_rooms(
     ).all()
 
     return rooms
+
+
+@app.delete("/rooms/{room_id}")
+def delete_room(
+    room_id: int,
+    db: Session = Depends(get_db)
+):
+
+    room = db.query(Room).filter(
+        Room.id == room_id
+    ).first()
+
+    if not room:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Room not found"
+        )
+
+    db.delete(room)
+
+    db.commit()
+
+    return {
+        "message": "Room deleted successfully"
+    }
+
+# =========================================================
+# FACULTIES
+# =========================================================
+
+@app.post("/faculties")
+def add_faculty(
+    faculty: FacultyRequest,
+    db: Session = Depends(get_db)
+):
+
+    existing_faculty = db.query(Faculty).filter(
+        Faculty.faculty_id == faculty.faculty_id,
+        Faculty.user_email == faculty.user_email
+    ).first()
+
+    if existing_faculty:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Faculty already exists"
+        )
+
+    new_faculty = Faculty(
+        user_email=faculty.user_email,
+        faculty_id=faculty.faculty_id,
+        name=faculty.name,
+        designation=faculty.designation,
+        department=faculty.department,
+        phone=faculty.phone,
+        experience=faculty.experience,
+        papers=faculty.papers,
+        rating=faculty.rating,
+        status=faculty.status
+    )
+
+    db.add(new_faculty)
+
+    db.commit()
+
+    db.refresh(new_faculty)
+
+    return {
+        "message": "Faculty added successfully"
+    }
+
+
+@app.get("/faculties/{email}")
+def get_faculties(
+    email: str,
+    db: Session = Depends(get_db)
+):
+
+    faculties = db.query(Faculty).filter(
+        Faculty.user_email == email
+    ).all()
+
+    return faculties
+
+
+@app.delete("/faculties/{faculty_id}")
+def delete_faculty(
+    faculty_id: int,
+    db: Session = Depends(get_db)
+):
+
+    faculty = db.query(Faculty).filter(
+        Faculty.id == faculty_id
+    ).first()
+
+    if not faculty:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Faculty not found"
+        )
+
+    db.delete(faculty)
+
+    db.commit()
+
+    return {
+        "message": "Faculty deleted successfully"
+    }
 
 # =========================================================
 # PROFILE
@@ -565,33 +1180,28 @@ def get_dashboard(
         Room.user_email == email
     ).count()
 
+    faculties_count = db.query(Faculty).filter(
+        Faculty.user_email == email
+    ).count()
+
     notifications_count = db.query(Notification).filter(
         Notification.user_email == email
     ).count()
-
-    allocated_count = students_count
 
     branches = db.query(Student.branch).filter(
         Student.user_email == email
     ).distinct().all()
 
-    branch_count = len(branches)
-
     return {
-
         "students": students_count,
-
         "rooms": rooms_count,
-
+        "faculties": faculties_count,
         "notifications": notifications_count,
-
-        "allocated": allocated_count,
-
-        "branches": branch_count
+        "branches": len(branches)
     }
 
 # =========================================================
-# CREATE NOTIFICATION
+# NOTIFICATIONS
 # =========================================================
 
 @app.post("/notifications")
@@ -615,11 +1225,10 @@ def create_notification(
 
     db.refresh(new_notification)
 
-    return new_notification
+    return {
+        "message": "Notification created successfully"
+    }
 
-# =========================================================
-# GET NOTIFICATIONS
-# =========================================================
 
 @app.get("/notifications/{email}")
 def get_notifications(
@@ -633,9 +1242,6 @@ def get_notifications(
 
     return notifications
 
-# =========================================================
-# DELETE NOTIFICATION
-# =========================================================
 
 @app.delete("/notifications/{notification_id}")
 def delete_notification(
@@ -740,8 +1346,4 @@ def download_report(
 # RUN SERVER
 # =========================================================
 
-# pip install fastapi uvicorn sqlalchemy pymysql reportlab
-# pip install email-validator python-multipart
-
-# Run:
-# uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# uvicorn main:app --reload
